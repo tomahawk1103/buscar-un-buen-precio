@@ -339,37 +339,56 @@ def get_enriched_portfolio(market_items=None):
         if current_price <= effective_sl:
             status_code = "STOP_ALERT"
             status_badge = "🚨 Bajo Stop Loss"
-            advice = f"El precio ({curr_sym}{current_price:,.{dec}f}) ha perforado tu nivel de Stop ({curr_sym}{effective_sl:,.{dec}f}). Revisa cierre defensivo."
+            advice = f"Valora vender para limitar el daño: el precio ha alcanzado o bajado de tu límite de pérdida y tu resultado desde la compra es {pnl_pct:+.1f}%."
             has_action_alert = True
         elif current_price >= effective_tp:
             status_code = "TP_REACHED"
             status_badge = "🏆 Objetivo Alcanzado"
-            advice = f"¡Objetivo TP superado! Valora recoger 50% en efectivo y proteger el resto con Trailing Stop en {curr_sym}{trailing_stop:,.{dec}f}."
+            advice = f"Valora recoger beneficios: has alcanzado tu objetivo y ganas un {pnl_pct:.1f}% desde la compra; puedes vender una parte y revisar el límite de salida del resto."
             has_action_alert = True
-        elif sell_score >= 65 and pnl_pct >= 5.0:
+        elif pnl_pct > 0 and (
+            sell_score >= 65
+            or (isinstance(rsi, (int, float)) and rsi >= 64)
+            or (0 <= sell.get("dist_to_high_pct", 100) <= 3.5)
+            or (avg_price < float(risk.get("take_profit_1") or 0) <= current_price)
+        ):
             status_code = "TAKE_PARTIAL"
-            status_badge = "🟠 Zona Venta Parcial"
-            advice = f"Alta presión de sobrecompra (Score Venta {sell_score}/100) con +{pnl_pct:.1f}% de ganancia. Buen punto para asegurar parciales."
+            status_badge = "🟠 Valorar vender una parte"
+            if avg_price < float(risk.get("take_profit_1") or 0) <= current_price:
+                reason = "el precio ya ha alcanzado la primera resistencia calculada"
+            elif sell_score >= 65 or (isinstance(rsi, (int, float)) and rsi >= 64):
+                reason = "los indicadores muestran una subida exigente que podría frenarse"
+            else:
+                reason = "el precio está a menos de un 3,5% del máximo del periodo"
+            advice = f"Valora vender una parte: llevas un +{pnl_pct:.1f}% desde tu compra y {reason}; no necesitas esperar al objetivo final para recoger beneficios."
             has_action_alert = True
         elif pnl_pct >= 7.0 and effective_sl < avg_price * 0.998:
             status_code = "MOVE_BE"
-            status_badge = "🛡️ Subir Stop a Break-Even"
-            advice = f"Posición con +{pnl_pct:.1f}% de colchón. Sube tu Stop Loss a tu entrada ({curr_sym}{avg_price:,.{dec}f}) para operar con riesgo cero."
+            status_badge = "🛡️ Mantener protegiendo la ganancia"
+            advice = f"Puedes seguir esperando, pero protege lo ganado: llevas un +{pnl_pct:.1f}% y tu límite de pérdida sigue por debajo de lo que pagaste; valora subirlo al precio de compra, aunque no garantiza salir sin pérdidas."
             has_action_alert = True
         elif pnl_pct > 0:
             status_code = "IN_PROFIT"
             status_badge = "🟢 En Beneficio"
-            advice = f"Tendencia favorable (+{pnl_pct:.1f}%). Mantener rumbo a {curr_sym}{effective_tp:,.{dec}f} vigilando soporte."
+            advice = f"Puedes mantener por ahora: ganas un {pnl_pct:.1f}% desde tu compra y no se activa una señal de recogida de beneficios; al objetivo le falta un {max(0, dist_to_tp_pct):.1f}%, pero no hay garantía de alcanzarlo."
         else:
             fib_61 = fibs.get("61.8%", 0)
             if fib_61 and current_price <= fib_61 and (live.get("score", 0) >= 70):
                 status_code = "DCA_ZONE"
                 status_badge = "💎 En Zona Áurea (DCA)"
-                advice = f"Retroceso controlado en Zona Áurea con Score {live.get('score')}/100. Vigilar soporte antes de promediar."
+                advice = f"Espera a que el precio se estabilice antes de decidir: pierdes un {abs(pnl_pct):.1f}% y estás en una zona de posible apoyo; eso no confirma que vaya a rebotar ni justifica comprar más por sí solo."
             else:
                 status_code = "DRAWDOWN"
                 status_badge = "🔵 En Retroceso Controlado"
-                advice = f"Flotante en {pnl_pct:.1f}%, respetando margen de seguridad sobre tu Stop ({curr_sym}{effective_sl:,.{dec}f})."
+                advice = f"Vigila antes de decidir vender: tu resultado es {pnl_pct:+.1f}% y el precio está un {dist_to_sl_pct:.1f}% por encima de tu límite de pérdida."
+
+        # Una resistencia intermedia puede justificar revisar una ganancia antes
+        # del objetivo final; nunca reemplaza el TP elegido por el usuario.
+        first_target = float(risk.get("take_profit_1") or 0)
+        if status_code in ("MOVE_BE", "IN_PROFIT") and current_price < first_target < effective_tp:
+            first_distance = (first_target / current_price - 1) * 100
+            if first_distance <= 3.5:
+                advice += f" La primera resistencia está a solo un {first_distance:.1f}%; si la subida se frena allí, valora vender una parte."
 
         if earnings.get("warning_level") == "IMMINENT":
             has_action_alert = True
