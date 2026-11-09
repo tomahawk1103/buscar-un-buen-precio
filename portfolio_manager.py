@@ -20,6 +20,30 @@ LATEST_DATA_PATH = os.path.join(DIRECTORY, "latest_data.json")
 PORTFOLIO_LOCK = threading.Lock()
 
 
+def _volume_position_context(live, current_price):
+    """Contexto histórico estimado; no convierte aceptación en señal de venta."""
+    liq = live.get("liquidity") or {}
+    if liq.get("profile_type") != "VOLUME" or liq.get("has_real_volume") is not True:
+        return ""
+    levels = [liq.get(key) for key in ("val_price", "poc_price", "vah_price")]
+    if not all(isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+               for value in levels):
+        return ""
+    lower, center, upper = levels
+    if not lower <= center <= upper or current_price <= 0:
+        return ""
+    if current_price < lower:
+        return "El precio está por debajo de la zona que concentró el 70% del volumen: vigila la debilidad antes de confiar en un rebote."
+    if current_price > upper:
+        return "El precio supera la zona que concentró el 70% del volumen; eso por sí solo no indica que debas vender."
+    overhead = [level for level in (center, upper) if level > current_price]
+    if overhead:
+        distance = (min(overhead) / current_price - 1) * 100
+        if distance <= 3.5:
+            return f"A un {distance:.1f}% por encima hay una zona de negociación destacada en el perfil de volumen estimado; observa si el precio la supera o se frena."
+    return "El precio sigue dentro de la zona que concentró el 70% del volumen; el perfil no confirma por sí solo una salida."
+
+
 def _default_portfolio():
     return {
         "version": "1.0",
@@ -333,6 +357,13 @@ def get_enriched_portfolio(market_items=None):
         sell_score = int(sell.get("sell_score", 0))
         rsi = live.get("rsi")
         earnings = live.get("earnings") or {}
+        first_target = float(risk.get("take_profit_1") or 0)
+        # Haber superado hace tiempo una resistencia no equivale a seguir
+        # chocando con ella. Evitar ventas parciales perpetuas tras una ruptura.
+        near_first_target = (
+            avg_price < first_target <= current_price
+            and (current_price / first_target - 1) * 100 <= 3.5
+        )
 
         # Diagnóstico inteligente de gestión de posición abierta
         has_action_alert = False
@@ -349,12 +380,13 @@ def get_enriched_portfolio(market_items=None):
         elif pnl_pct > 0 and (
             sell_score >= 65
             or (isinstance(rsi, (int, float)) and rsi >= 64)
-            or (0 <= sell.get("dist_to_high_pct", 100) <= 3.5)
-            or (avg_price < float(risk.get("take_profit_1") or 0) <= current_price)
+            or (isinstance(sell.get("dist_to_high_pct"), (int, float))
+                and 0 <= sell["dist_to_high_pct"] <= 3.5)
+            or near_first_target
         ):
             status_code = "TAKE_PARTIAL"
             status_badge = "🟠 Valorar vender una parte"
-            if avg_price < float(risk.get("take_profit_1") or 0) <= current_price:
+            if near_first_target:
                 reason = "el precio ya ha alcanzado la primera resistencia calculada"
             elif sell_score >= 65 or (isinstance(rsi, (int, float)) and rsi >= 64):
                 reason = "los indicadores muestran una subida exigente que podría frenarse"
@@ -384,11 +416,15 @@ def get_enriched_portfolio(market_items=None):
 
         # Una resistencia intermedia puede justificar revisar una ganancia antes
         # del objetivo final; nunca reemplaza el TP elegido por el usuario.
-        first_target = float(risk.get("take_profit_1") or 0)
         if status_code in ("MOVE_BE", "IN_PROFIT") and current_price < first_target < effective_tp:
             first_distance = (first_target / current_price - 1) * 100
             if first_distance <= 3.5:
                 advice += f" La primera resistencia está a solo un {first_distance:.1f}%; si la subida se frena allí, valora vender una parte."
+
+        if status_code not in ("STOP_ALERT", "TP_REACHED"):
+            volume_context = _volume_position_context(live, current_price)
+            if volume_context:
+                advice += " " + volume_context
 
         if earnings.get("warning_level") == "IMMINENT":
             has_action_alert = True
