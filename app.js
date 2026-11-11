@@ -3265,6 +3265,44 @@ function renderScenarioOverview(data) {
     : journalScenario === "confirmation" ? `<p class="journal-method-note">${watches.length} activos vigilados. Techo de las dos últimas velas horarias completas; se fija tras el primer cierre por encima y exige un segundo cierre horario consecutivo. Si existe historia del S&P 500, bloquea compras de acciones cuando su último cierre está bajo la media de 20 sesiones. Sin historia del índice, el contexto se marca sin confirmar. No incluye un filtro sectorial.</p>` + watches.map(([ticker, w]) => `<p class="journal-method-note">${escapeHtml(ticker)} · ${escapeHtml(w.state)} · Techo cercano ${w.state === "SIN_DATOS_HORARIOS" ? "Pendiente de datos" : formatPrice(w.breakout, w)} · Cierres ${number(w.confirmations)}/2 · ${w.interval === "1h" ? "Velas de 1 hora" : "Pendiente de actualizar"} · Desde ${escapeHtml(w.since)} · ${escapeHtml(w.market_context || "Mercado sin confirmar")}</p>`).join("")
       : '<p class="journal-method-note">Reglas anteriores: zona Fibonacci o score ≥ 70. Se conservan entradas, cierres y seguimiento de posiciones abiertas.</p>';
   if (journalScenario === "confirmation") host.insertAdjacentHTML("beforeend", comparison);
+  if (journalScenario === "confirmation") renderJournalWatchboard(host, data);
+}
+
+function renderJournalWatchboard(host, data) {
+  const watches = Object.entries(data.watches || {});
+  const assets = marketData?.data || [];
+  const blocked = watches.filter(([, w]) => w.market_context === "Mercado débil: entrada bloqueada").length;
+  const hourly = watches.filter(([, w]) => w.confirmations >= 2).length;
+  const latest = (data.entries || []).map(e => e.signal_date || "").sort().pop();
+  const validAssets = assets.filter(a => !a.is_stale && Number(a.sma_200) > 0 && Number(a.current_price) > 0);
+  const above = validAssets.filter(a => a.current_price >= a.sma_200).length;
+  const escape = escapeHtml;
+  const cards = watches.map(([ticker, watch]) => {
+    const asset = assets.find(a => a.ticker === ticker);
+    const hasPrice = Number.isFinite(Number(watch.current_price)) && Number(watch.current_price) > 0;
+    const hasLevel = Number.isFinite(Number(watch.breakout)) && Number(watch.breakout) > 0;
+    const below = hasPrice && hasLevel && watch.current_price < watch.breakout;
+    const marketBlocked = watch.market_context === "Mercado débil: entrada bloqueada";
+    const missing = watch.state === "SIN_DATOS_HORARIOS" || watch.interval !== "1h";
+    const reason = missing ? "Faltan velas horarias" : marketBlocked ? "Bloqueada por el mercado" : below ? "Precio bajo el techo" : watch.confirmations < 2 ? "Esperando cierres horarios" : watch.state === "CONFIRMADA" ? "Confirmación técnica completada" : "Pendiente de tendencia corta";
+    const next = missing ? "Esperar datos horarios completos." : marketBlocked ? "El último cierre completo del S&P 500 debe recuperar su media de 20 sesiones. La subida intradía todavía no cuenta." : below ? "Recuperar el techo y mantener los cierres exigidos." : watch.confirmations < 2 ? "Completar dos cierres consecutivos por encima del mismo techo." : "El motor aún debe validar tendencia, objetivos, riesgo y posiciones abiertas antes de registrar una entrada.";
+    const fmt = { currency: watch.currency || asset?.currency || "", decimals: asset?.decimals ?? 2 };
+    // Precio y techo pertenecen al mismo estado del Diario y comparten su conversión.
+    const price = value => formatPrice(value, fmt);
+    const gap = hasPrice && hasLevel ? ((watch.current_price / watch.breakout - 1) * 100).toLocaleString("es-ES", { maximumFractionDigits: 2 }) : null;
+    return `<article class="journal-watch-card"><div class="journal-watch-heading"><h4>${escape(ticker)}</h4><span>${escape(reason)}</span></div>
+      <p class="journal-watch-metrics">Precio observado <strong>${hasPrice ? price(watch.current_price) : "Sin dato"}</strong> · Techo <strong>${hasLevel ? price(watch.breakout) : "Sin dato"}</strong></p>
+      <p>Cierres horarios: <strong>${escape(String(watch.confirmations ?? 0))}/2</strong>${gap !== null ? ` · Distancia al techo: ${escape(gap)} %` : ""}</p>
+      <p class="journal-watch-next">${escape(next)}</p>
+      ${asset?.is_stale ? '<p>Cotización en caché: pendiente de actualización.</p>' : ""}
+      <details><summary>Contexto de la vigilancia</summary><p>Desde ${escape(watch.since || "Sin fecha")} · Última vela evaluada: ${escape(watch.last_breakout_day || "Sin dato")}. ${escape(watch.market_context || "Mercado sin confirmar")}.</p><p>La confirmación horaria no garantiza una entrada. Se exige margen mínimo de 2 ATR para el stop y beneficio/riesgo de al menos 1,5 hasta TP1.</p></details></article>`;
+  }).join("");
+  host.innerHTML = `<section class="journal-watch-summary"><h3>Qué está esperando el Diario</h3>
+    <p>${watches.length} activos vigilados · ${hourly} con dos cierres horarios · ${blocked} bloqueados por mercado.</p>
+    <p>${blocked ? "Hay recuperaciones individuales, pero el filtro diario del mercado sigue frenando entradas en acciones." : "No hay vigilancias bloqueadas por mercado en este registro. Cada activo debe completar su confirmación y filtro de riesgo."}</p>
+    <small>Diario actualizado: ${escape(data.last_updated || "Sin fecha")} · Última señal registrada: ${escape(latest || "Todavía ninguna")}</small></section>
+    <section class="journal-market-reading"><h3>Lectura de la lista vigilada</h3><p>${validAssets.length ? `${above} de ${validAssets.length} activos con datos válidos cotizan sobre su media de 200 sesiones. ${above > validAssets.length / 2 ? "Predomina la fuerza de largo plazo en esta lista." : "La fuerza de largo plazo todavía es limitada en esta lista."}` : "Sin cotizaciones suficientes para valorar la tendencia de la lista."} Esta muestra combina distintos activos y no representa la amplitud del mercado completo.</p><p>La tendencia de largo plazo, la confirmación horaria y el filtro diario del índice pueden dar lecturas distintas. Un score alto identifica condiciones técnicas; no es una probabilidad de éxito.</p><small>Cotizaciones: ${escape(marketData?.timestamp || "Sin fecha")} · Periodo del panel: ${escape(marketData?.period || currentPeriod)}. Los niveles de vigilancia no cambian al elegir otro periodo.</small></section>
+    <div class="journal-watch-grid">${cards || '<p class="journal-method-note">Todavía no hay activos en vigilancia. Se incorporan al alcanzar la zona Fibonacci o un score de al menos 70 durante una actualización de mercado.</p>'}</div>`;
 }
 
 async function loadAndRenderJournal() {

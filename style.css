@@ -4922,3 +4922,18 @@ body { padding-bottom: 88px; }
 .stabilization-context p { margin: 8px 0; }
 .stabilization-context span, .stabilization-context small { display: block; margin-top: 8px; }
 .stabilization-context small { opacity: .8; }
+
+/* Diario: estado de las vigilancias y contexto de mercado. */
+.journal-watch-summary, .journal-market-reading, .journal-watch-card { padding: 20px; border: 1px solid var(--border-color, #333); border-radius: var(--radius-md); background: var(--bg-card, #171717); min-width: 0; overflow-wrap: anywhere; }
+.journal-watch-summary { border-left: 3px solid #d6aa58; }
+.journal-watch-summary h3, .journal-market-reading h3, .journal-watch-heading h4 { margin: 0; color: var(--text-primary); }
+.journal-watch-summary p, .journal-market-reading p, .journal-watch-card p { color: var(--text-secondary); font-size: .88rem; line-height: 1.65; margin: 10px 0; }
+.journal-watch-summary small, .journal-market-reading small { color: var(--text-secondary); line-height: 1.6; }
+.journal-watch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.journal-watch-heading { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.journal-watch-heading span { font-size: .78rem; color: #e5c78c; }
+.journal-watch-card strong { color: var(--text-primary); }
+.journal-watch-card details { font-size: .8rem; color: var(--text-secondary); line-height: 1.6; }
+.journal-watch-card summary { cursor: pointer; padding: 8px 0; }
+.journal-watch-next { border-top: 1px solid var(--border-color, #333); padding-top: 10px; }
+@media (max-width: 700px) { .journal-watch-grid { grid-template-columns: minmax(0, 1fr); } .journal-watch-summary, .journal-market-reading, .journal-watch-card { padding: 15px; } }
